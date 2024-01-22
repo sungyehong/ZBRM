@@ -366,10 +366,7 @@ show_zfsa_usage_by_project() {
     for zfsa in ${!ZFSA_INVENTORY[@]}; do
         TR " ${zfsa}"; TR
         TR "    Pool: ${ZFSA_USAGE[${zfsa}.pools]}"; TR
-        TR "    CPU: ${ZFSA_USAGE[${zfsa}.activity.cpu]}% \
-                I/O: ${ZFSA_USAGE[${zfsa}.activity.io]} IOPS \
-                NFS: ${ZFSA_USAGE[${zfsa}.activity.nfs]} OPS \
-                NET: ${ZFSA_USAGE[${zfsa}.activity.nic]} KB"; TR
+        TR "    CPU: ${ZFSA_USAGE[${zfsa}.activity.cpu]}%   I/O: ${ZFSA_USAGE[${zfsa}.activity.io]} IOPS    NFS: ${ZFSA_USAGE[${zfsa}.activity.nfs]} OPS    NET: ${ZFSA_USAGE[${zfsa}.activity.nic]} KB"; TR
     done    
     BD "=" ${tbl_row_width}
 
