@@ -1,11 +1,16 @@
 #!/bin/sh
 #│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
 # 
-# ZFS Appliance Usage v0.7
+# ZFS Appliance Usage v0.72
 # 
 # zbrmusage.sh [-if]
 # - zfsadashboard.sh -i 5 -f inventory.ini       ZFSA Resource 상태 5초 간격으로 보기
 #			
+# Bug fix:
+#   - Controller에 풀, 프로젝트가 없을 때의 오류
+#   - ksh ~= 미지원 : string = *substring* 으로 변경
+# Enhancement:
+#   - 멀티 센터에 대한 지원(동일 풀이름 구성 지원) => TBD
 #│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
 
 # Default inventory 파일
@@ -344,7 +349,7 @@ show_zfsa_usage_by_project() {
         all_pools+="${ZFSA_USAGE[${zfsa}.pools]},"
         all_projects+="${ZFSA_USAGE[${zfsa}.projects]},"
     done 
-
+    
     # pool 이름으로 홀/짝으로 좌우 정렬하고 어레이로 생성
     all_pools=($(relocate_str_by_name "${all_pools}" | tr "," " "))
     # 프로젝트 정렬, 중복 제거
@@ -393,25 +398,37 @@ show_zfsa_usage_by_project() {
 
         for pool_name in ${all_pools[@]}; do 
             for zfsa in ${!ZFSA_INVENTORY[@]}; do
+                # ZFSA Controller의 풀, 프로젝트 리스트
                 zfsa_pools="${ZFSA_USAGE[${zfsa}.pools]}"
-                if [[ ${zfsa_pools} =~ ${pool_name} ]]; then 
+                zfsa_projects="${ZFSA_USAGE[${zfsa}.${pool_name}.projects]}"
+
+                # 콘트롤러에 풀이 존재하지 않으면 
+                if [[ ! ${zfsa_pools} = *${pool_name}* ]]; then 
+                    continue 
+                fi 
+
+                # echo "ZFSA_USAGE[${zfsa}.${pool_name}.${project_name}.used_total=${used_total}"
+                # 프로젝트가 존재하면 사용량 표시
+                if [[ ${zfsa_projects} = *${project_name}* ]]; then 
                     used_data=${ZFSA_USAGE[${zfsa}.${pool_name}.${project_name}.used_data]}
                     used_snapshot=${ZFSA_USAGE[${zfsa}.${pool_name}.${project_name}.used_snapshot]}
                     used_total=${ZFSA_USAGE[${zfsa}.${pool_name}.${project_name}.used_total]}
-                    
-                    if [[ ${used_total} -ne -1 ]]; then
-                        project_used_sum=$((${project_used_sum} + ${used_total}))
-                        used_data=$(number2str ${used_data})
-                        used_snapshot=$(number2str ${used_snapshot})
-                        used_total=$(number2str ${used_total})
 
-                        project_used_str+="%s -w ${tr_width_usage_col};${used_data};${used_snapshot};${used_total};"
-                    else 
-                        project_used_str+="%s -w ${tr_width_usage_col};;;;"
-                    fi 
+                    # 프로젝트 사용량 합계
+                    project_used_sum=$((${project_used_sum} + ${used_total}))
+
+                    # 숫자를 문자열로 변환
+                    used_data=$(number2str ${used_data})
+                    used_snapshot=$(number2str ${used_snapshot})
+                    used_total=$(number2str ${used_total})
+
+                    project_used_str+="%s -w ${tr_width_usage_col};${used_data};${used_snapshot};${used_total};"
+                # 프로젝트가 존재하지 않으면 X로 표시               
+                else 
+                    project_used_str+="%s -w ${tr_width_usage_col};X;X;X;"
                 fi 
-            done
-        done 
+            done 
+        done
 
         project_used_sum=$(number2str ${project_used_sum})
         project_used_str+="%s -w ${tr_width_pool_col};${project_used_sum}"
@@ -528,19 +545,19 @@ init() {
         echo -e ${RED}"Inventory file contains no items."${NORMAL}
         exit 1
     fi 
-
+    
     # 모든 ZFSA Controller에 접속해 현황 정보를 딕셔너리 구조로 저장 
     for key in "${!ZFSA_INVENTORY[@]}"; do
         para=$(echo ${ZFSA_INVENTORY[$key]} | tr ":" " ") 
         
         # [테스트]현황 정보를 파일로 저장할때
-        # get_zfsa_usage ${para} ${key} > zfsa.out
+        # get_zfsa_usage ${para} ${key} >> zfsa.out
 
         # [실사용]현황 정보의 딕셔너리 구조를 쉘 환경 변수로 
         # eval "$(get_zfsa_usage ${para} ${key})"
     done
     # [테스트] 저장된 파일의 딕셔너릴 구조를 쉘 환경 변수로 
-    eval "$(cat zfsa.out)"
+    eval "$(cat ZFS9.out)"
 }
 
 # Main rountie
