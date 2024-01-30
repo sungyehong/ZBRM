@@ -10,9 +10,6 @@ LGRAY="\033[0;37m"
 DGRAY="\033[0;30m"
 NORMAL="\033[0m"
 
-# SSH Connection timeout
-SSH_TIMEOUT=3
-
 # 용량 출력시 소수점 이하 자리 수(0=>소수점이하 절삭, 2=>1자리...)
 DECIMALPOINT=1
 
@@ -27,46 +24,59 @@ KB=1000
 #   $1: number
 #   $2: decimal point (default: 1)
 number2str() {
-    # number와 decimal이 없으면
-    number=${1:-0}
-    decimal=${2:-1}
-    
-    if [[ ${number} -ge ${TB} ]]; then 
-        tostr=$(echo "scale=${decimal}; ${number}/${TB}" | bc)
-        unit_str="T"    
-    elif [[ ${number} -ge ${GB} ]]; then
-        tostr=$(echo "scale=${decimal}; ${number}/${GB}" | bc)
-        unit_str="G"
-    elif [[ ${number} -ge ${MB} ]]; then
-        tostr=$(echo "scale=${decimal}; ${number}/${MB}" | bc)
-        unit_str="M"
-    elif [[ ${number} -ge ${KB} ]]; then
-        tostr=$(echo "scale=${decimal}; ${number}/${KB}" | bc)
-        unit_str="K"
-    else 
-        tostr=${number}
-        unit_str=""
-    fi 
-    # 소수점 이하가 .0이면 소수점 이하 삭제 1.0 => 1
-    tostr=$(echo ${tostr} | sed 's/.0$//')"${unit_str}"
+   # number와 decimal이 없으면
+   number=${1:-0}
+   decimal=${2:-1}
+   
+   if [[ ${number} -ge ${TB} ]]; then 
+      tostr=$(echo "scale=${decimal}; ${number}/${TB}" | bc)
+      unit_str="TB"    
+   elif [[ ${number} -ge ${GB} ]]; then
+      tostr=$(echo "scale=${decimal}; ${number}/${GB}" | bc)
+      unit_str="GB"
+   elif [[ ${number} -ge ${MB} ]]; then
+      tostr=$(echo "scale=${decimal}; ${number}/${MB}" | bc)
+      unit_str="MB"
+   elif [[ ${number} -ge ${KB} ]]; then
+      tostr=$(echo "scale=${decimal}; ${number}/${KB}" | bc)
+      unit_str="KB"
+   else 
+      tostr=${number}
+      unit_str=""
+   fi 
+
+   # 0이면 -으로 표시
+   [[ ${tostr} == "0" ]] && tostr="-"
+
+   # 소수점 이하가 .0이면 소수점 이하 삭제 1.0 => 1
+   # tostr=$(echo ${tostr} | sed 's/.0$//')"${unit_str}"
+   tostr="${tostr}${unit_str}"
 
     echo ${tostr}
 }
 
-# 가로선 출력
-# Parameter:
-#  $1: 구분선 문자
-#  $2: 구분선 길이
-#  $3: 패딩 (optional)
-BD() {
-   # 좌측 패딩 
-   [[ ${3} -gt 0 ]] && printf "%-${3}s" " "
+# 문자열에 단어 확인
+#   Parameter:
+#   $1: 문자열
+#   $2: 찾을 단어
+in_str() {
+   echo "${1}" | grep -qw ${2}
 
-   printf "+"
-   for i in $(seq 1 $((${2} - 2))); do
-      printf ${1}
+   echo $?
+}
+
+# 어레이 항목 확인
+#   Parameter:
+#   $1: 어레이
+#   $2: 찾을 값
+in_array() {
+   for i in ${!1[@]}; do
+      if [[ ${i} == "${2}" ]]; then
+         echo 0
+      fi
    done
-   printf "+"; printf "\n"
+   
+   echo 1
 }
 
 # 컬럼 출력 형식 설정
@@ -78,22 +88,28 @@ SETTD() {
       case ${1} in
          -a|--align)
             shift 1
-            if [[ ! -z ${1} ]]; then 
+            if [[ ! -z ${1} && ${1} != -* ]]; then 
                TDALIGN=${1}
             fi
             shift 1
             ;;
          -w|--width)
             shift 1
-            if [[ ! -z ${1} ]]; then
+            if [[ ! -z ${1} && ${1} != -* ]]; then
                TDWIDTH=${1}
             fi 
             shift 1
             ;;
          -p|--pad)
             shift 1
-            if [[ ! -z ${1} ]]; then
+            if [[ ! -z ${1} && ${1} != -* ]]; then
                TDPAD=${1}
+            fi
+            ;;
+         -fc|--font_color)
+            shift 1
+            if [[ ! -z ${1} && ${1} != -* ]]; then
+               eval TDCOLOR=$(echo "$"${1})
             fi
             ;;
          *)
@@ -146,8 +162,9 @@ TD() {
          ;;
    esac 
 
-   printf ${fmt} "${TDSTR}"
-
+   [[ ! -z ${TDCOLOR} ]] && printf ${TDCOLOR}
+   printf ${fmt} "${TDSTR}" 
+   [[ ! -z ${TDCOLOR} ]] && printf ${NORMAL}
 }
 
 # 컬럼 출력 형식 설정
@@ -158,21 +175,21 @@ SETTR() {
       case ${1} in
          -w|--width)
             shift 1
-            if [[ ! -z ${1} ]]; then 
+            if [[ ! -z ${1} && ${1} != -* ]]; then 
                TRWIDTH=$(( ${1} - 1 ))
                shift 1
             fi 
             ;;
          -a|--align)
             shift 1
-            if [[ ! -z ${1} ]]; then 
+            if [[ ! -z ${1} && ${1} != -* ]]; then 
                TRALIGN=${1}
                shift 1
             fi
             ;;
          -l|--lbar)
             shift 1
-            if [[ ! -z ${1} &&  ${1} != -* ]]; then 
+            if [[ ! -z ${1} && ${1} != -* ]]; then 
                TRLBAR=${1}
                shift 1
             else 
@@ -181,7 +198,7 @@ SETTR() {
             ;;
          -c|--cbar)
             shift 1
-            if [[ ! -z ${1} &&  ${1} != -* ]]; then 
+            if [[ ! -z ${1} && ${1} != -* ]]; then 
                TRCBAR=${1}
                shift 1
             else 
@@ -199,9 +216,15 @@ SETTR() {
             ;;
          -p|--padding)
             shift 1
-            if [[ ! -z ${1} ]]; then 
+            if [[ ! -z ${1} && ${1} != -* ]]; then 
                TRPAD=${1}
                shift 1
+            fi
+            ;;
+         -fc|--font_color)
+            shift 1
+            if [[ ! -z ${1} && ${1} != -* ]]; then
+               TRCOLOR=${1}
             fi
             ;;
          *)
@@ -225,7 +248,7 @@ TR() {
    if [[ -z ${1} ]]; then 
       TD; return 0
    fi 
-
+   
    # 테이블내 컬럼 문자열에 스페이스가 포함되어 있을 수 있어 ; 문자로 구분
    oldifs=$IFS; IFS=";"
    # 컬럼 문자열을 어레이형으로
@@ -235,31 +258,63 @@ TR() {
    # 패딩 설정이 있으면, 패딩 사용은 사전 선언 필요
    # TR "%s -p 5"; TR "Hello"
    [[ ${TRPAD} -gt 0 ]] && TD " " -w ${TRPAD}
-   # 컬럼 출력
+
+   # 출력 컬럼 수 사전 확인
+   # 출력 물자열에 형식 설정과 문자열이 같이 있어 실제 출력될 컬럼수 확인 
+   colno=0
    for i in ${!TRSTR[@]}; do
-      # 포멧 설정
+      [[ ! ${TRSTR[${i}]:0:2} == "%s" ]] && colno=$((${colno} + 1))
+   done
+
+   # 컬럼 출력
+   colpos=0
+   
+   for i in ${!TRSTR[@]}; do
+      # 출력 형식 설정
       if [[ ${TRSTR[${i}]:0:2} == "%s" ]]; then 
          SETTR ${TRSTR[${i}]:2:${#TRSTR[${i}]}}
       else 
+         colpos=$((${colpos} + 1))
+
          # width가 선언되지 않으면 컬럼 문자열 길이
          [[ -z ${TRWIDTH} ]] && TRWIDTH=${#TRSTR[${i}]}
          [[ -z ${TRALIGN} ]] && TRALIGN=C
          
          # 첫번째 컬럼 시작
-         if [[ ${i} -eq 0 ]]; then 
-            [[ ! -z ${TRLBAR} ]] && TD "${TRLBAR}" -w 1 || TD " " -w 1
+         if [[ ${colpos} -eq 1 ]]; then 
+            [[ ! -z ${TRLBAR} ]] && TD "${TRLBAR}" -w 1 -fc ${TRCOLOR} || TD " " -w 1
          fi
 
          # 마지막 컬럼이면
-         if [[ ${i} -eq $(( ${#TRSTR[@]} - 1)) ]]; then 
-            TD "${TRSTR[${i}]}" -w $(( ${TRWIDTH} - 1 )) -a ${TRALIGN}
-            [[ ! -z ${TRRBAR} ]] &&  TD "${TRRBAR}" -w 1 || TD " " -w 1
+         if [[ ${colpos} -eq ${colno} ]]; then 
+            TD "${TRSTR[${i}]}" -w $(( ${TRWIDTH} - 1 )) -a ${TRALIGN} -fc ${TRCOLOR}
+            [[ ! -z ${TRRBAR} ]] &&  TD "${TRRBAR}" -w 1 -fc ${TRCOLOR} || TD " " -w 1
          else 
-            TD "${TRSTR[${i}]}" -w ${TRWIDTH} -a ${TRALIGN}
-            [[ ! -z ${TRCBAR} ]] && TD "${TRCBAR}" -w 1 || TD " " -w 1
+            TD "${TRSTR[${i}]}" -w ${TRWIDTH} -a ${TRALIGN} -fc ${TRCOLOR}
+            [[ ! -z ${TRCBAR} ]] && TD "${TRCBAR}" -w 1 -fc ${TRCOLOR} || TD " " -w 1
          fi 
       fi
    done
+}
+
+# 가로선 출력
+# Parameter:
+#  $1: 구분선 문자
+#  $2: 구분선 길이
+#  $3: 패딩 (optional)
+BD() {
+   # 좌측 패딩 
+   if [[ ${3} -gt 0 ]]; then
+      for i in $(seq 1 ${3}); do
+         TD " "
+      done
+   fi
+
+   TD "+" 
+   for i in $(seq 1 $((${2} - 2))); do
+      TD ${1}
+   done
+   TD "+"; TD
 }
 
 # 문자열 리스트를  홀수는 좌측 짝수는 우축으로 정렬

@@ -11,40 +11,40 @@
 #   - ksh ~= 미지원 : string = *substring* 으로 변경
 # Enhancement:
 #   - 멀티 센터에 대한 지원(동일 풀이름 구성 지원) => TBD
+# ZBRM Profile의 ZFSA 접속 정보 사용 
+# - parsing_inventory_env 함수 추가
 #│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
 
 # Default inventory 파일
-INVENTORY_FILE=./inventory.ini
+INVENTORY_FILE=./zfsa.ini
 
-# 업데이트 대기 시간 (0: 1회 수행, n: n초 간격으로 반복)
-INTERVAL=0
-# 업데이트 시간 최소값 
-MIN_INTERVAL=5
+# ZFSA Login String Prefix
+ZFSA_LOGINSTR_PREFIX=LOGINSTRING_
+# LOGINSTRING_1=root@192.168.56.151
+# LOGINSTRING_2=root@192.168.56.152
+
+# SSH Connection timeout
+SSH_TIMEOUT=3
 
 # Dictionary 데이터 구조 생성
 if [[ $SHELL == "/bin/ksh" ]]; then 
     typeset -A ZFSA_INVENTORY
-    typeset -A ORADB_INVENTORY
     typeset -A ZFSA_USAGE
-    typeset -A ORADB_USAGE
 else 
     declare -A ZFSA_INVENTORY
-    declare -A ORADB_INVENTORY
     declare -A ZFSA_USAGE
-    declare -A ORADB_USAGE
 fi
 
 # ZFS Appliance 현황 정보를 딕셔너리 구조의 문자열로 리턴
 # Parameter:
-#   $1: IP address
-#   $2: User ID
+#   $1: User ID
+#   $2: Hostname or IP address
 #   $3: ZFSA Name 
+#   $4: Location (optional)
 get_zfsa_usage() {
-
     zfsa_script="
     script
     {
-        const ZFSA_CTL='${3}';
         // 용량 단위 환산을 위한 상수
         const TB = 1000000000000;
         const GB = 1000000000;
@@ -52,9 +52,6 @@ get_zfsa_usage() {
         const KB = 1000;
         // 용량 출력시 소수점 이하 자리 수(0=>소수점이하 절삭, 2=>1자리...)
         const DECIMAL_POINT = 2; 
-
-        // 사용 현황 객체 변수
-        // var ZFSA_USAGE = {};
 
         // 풀, 프로젝트 어레이 변수
         var zfsa_pools = [];
@@ -121,26 +118,7 @@ get_zfsa_usage() {
             return unique;
         }
 
-        // Hardware info
-        function get_hardware() {
-            run('cd /');
-            run('maintenance');
-            run('hardware');
-
-            hwlist = list();
-            for(hw=0; hw<hwlist.length; hw++) {
-                print(hwlist[hw]);
-            }
-            
-            // list -> select chassis matched name -> select disk
-            // zfsa_system_state= state = ok, or ??
-            // ZFSA_USAGE[]
-            // zfsa_disk_state= no of disks, ok or ??
-            // hardware_disks = ''; 
-        }
-
         // ZFSA Controller 전체 풀 리스트 딕셔너리 문자열로 출력
-        // 전체 풀: ZFSA_USAGE=[ZFSACTL.pools]
         function get_pool() {
             run('cd /');
             run('status');
@@ -148,7 +126,7 @@ get_zfsa_usage() {
 
             zfsa_pools = list();
 
-            ret_str = 'ZFSA_USAGE['+ZFSA_CTL+'.pools]=\"';
+            ret_str = 'ZFSA_USAGE['+ZFSA_CTL_STR+'.pools]=\"';
             ret_str = ret_str + zfsa_pools.toString();
             ret_str = ret_str + '\"';
 
@@ -177,7 +155,7 @@ get_zfsa_usage() {
                 // default project 제외
                 zfsa_pool_projects.splice(zfsa_pool_projects.indexOf('default'));
 
-                ret_str = 'ZFSA_USAGE['+ZFSA_CTL+'.'+pool_name+'.projects]=\"';
+                ret_str = 'ZFSA_USAGE['+ZFSA_CTL_STR+'.'+pool_name+'.projects]=\"';
                 ret_str = ret_str + zfsa_pool_projects.toString();
                 ret_str = ret_str + '\"';
 
@@ -192,7 +170,7 @@ get_zfsa_usage() {
             // 중복된 프로젝트 항목 제거하고
             zfsa_projects = remove_duplicates(zfsa_projects);
 
-            ret_str = 'ZFSA_USAGE['+ZFSA_CTL+'.projects]=\"';
+            ret_str = 'ZFSA_USAGE['+ZFSA_CTL_STR+'.projects]=\"';
             ret_str = ret_str + zfsa_projects.toString();
             ret_str = ret_str + '\"';
 
@@ -201,78 +179,42 @@ get_zfsa_usage() {
             printf(fmt, ret_str); print('');
         }
 
-        // ZFSA CPU, IO. NFS, NIC activity report
-        function get_activity() {
-            run('cd /');
-            run('status');
-            run('activity');
-
-            // Activity 객체 생성
-            zfsa_activity = {};
-
-            // CPU Utilization(%)
-            run('select cpu.utilization');
-            zfsa_activity.cpu = parseInt(run('get average').split(/\s+/)[3]);
-            run('cd ..');
-
-            // I/O operation(op/sec)
-            run('select io.ops');
-            zfsa_activity.io = parseInt(run('get average').split(/\s+/)[3]);
-            run('cd ..');
-
-            // NFS operation(op/sec)
-            run('select nfs3.ops');
-            zfsa_activity.nfs = parseInt(run('get average').split(/\s+/)[3]);
-            run('cd ..');
-
-            run('select nfs4.ops');
-            zfsa_activity.nfs += parseInt(run('get average').split(/\s+/)[3]);
-            run('cd ..');
-            
-            // Network bandwidth
-            run('select nic.kilobytes')
-            zfsa_activity.nic = parseInt(run('get average').split(/\s+/)[3]);
-
-            // Resource activity를 dictionary 구조의 문자열로 출력
-            ret_str = 'ZFSA_USAGE['+ZFSA_CTL+'.activity.cpu]='+zfsa_activity.cpu;
-            fmt = '%-'+ret_str.length+'s';
-            printf(fmt, ret_str); print('');
-
-            ret_str = 'ZFSA_USAGE['+ZFSA_CTL+'.activity.io]='+zfsa_activity.io;
-            fmt = '%-'+ret_str.length+'s';
-            printf(fmt, ret_str); print('');
-
-            ret_str = 'ZFSA_USAGE['+ZFSA_CTL+'.activity.nfs]='+zfsa_activity.nfs;
-            fmt = '%-'+ret_str.length+'s';
-            printf(fmt, ret_str); print('');
-
-            ret_str = 'ZFSA_USAGE['+ZFSA_CTL+'.activity.nic]='+zfsa_activity.nic;
-            fmt = '%-'+ret_str.length+'s';
-            printf(fmt, ret_str); print('');
-        }
-
         // ZFSA 스토리지 풀 사용 현황 
         // used, avail, total 용량을 바이트 단위로 출력
         function get_usage_by_pool(pool_name) {
             run('cd /');
-            run('status');
-            run('storage');
-            run('select ' + pool_name);
+            run('shares');
+            set('pool', pool_name);
 
-            used = change2byte(run('get used').split(/\s+/)[3]);
-            avail = change2byte(run('get avail').split(/\s+/)[3]);
-            total = used + avail;
+            ptotal = change2byte(run('get capacity').split(/\s+/)[3]);
+            usage_data = change2byte(run('get usage_data').split(/\s+/)[3]);
+            usage_snapshots = change2byte(run('get usage_snapshots').split(/\s+/)[3]);
+            usage_replication = change2byte(run('get usage_replication').split(/\s+/)[3]);
+            usage_total = change2byte(run('get usage_total').split(/\s+/)[3]);
+            pavail = change2byte(run('get space_available').split(/\s+/)[3]);
 
             // Pool usage를 dictionary 구조의 문자열로 출력
-            ret_str = 'ZFSA_USAGE['+ZFSA_CTL+'.'+pool_name+'.used]='+parseFloat(used).toString();
+            ret_str = 'ZFSA_USAGE['+ZFSA_CTL_STR+'.'+pool_name+'.ptotal]='+parseFloat(ptotal).toString();
             fmt = '%-'+ret_str.length+'s';
             printf(fmt, ret_str); print('');
 
-            ret_str = 'ZFSA_USAGE['+ZFSA_CTL+'.'+pool_name+'.avail]='+parseFloat(avail).toString();
+            ret_str = 'ZFSA_USAGE['+ZFSA_CTL_STR+'.'+pool_name+'.usage_data]='+parseFloat(usage_data).toString();
             fmt = '%-'+ret_str.length+'s';
             printf(fmt, ret_str); print('');
 
-            ret_str = 'ZFSA_USAGE['+ZFSA_CTL+'.'+pool_name+'.total]='+parseFloat(total).toString();
+            ret_str = 'ZFSA_USAGE['+ZFSA_CTL_STR+'.'+pool_name+'.usage_snapshots]='+parseFloat(usage_snapshots).toString();
+            fmt = '%-'+ret_str.length+'s';
+            printf(fmt, ret_str); print('');
+
+            ret_str = 'ZFSA_USAGE['+ZFSA_CTL_STR+'.'+pool_name+'.usage_replication]='+parseFloat(usage_replication).toString();
+            fmt = '%-'+ret_str.length+'s';
+            printf(fmt, ret_str); print('');
+
+            ret_str = 'ZFSA_USAGE['+ZFSA_CTL_STR+'.'+pool_name+'.usage_total]='+parseFloat(usage_total).toString();
+            fmt = '%-'+ret_str.length+'s';
+            printf(fmt, ret_str); print('');
+
+            ret_str = 'ZFSA_USAGE['+ZFSA_CTL_STR+'.'+pool_name+'.pavail]='+parseFloat(pavail).toString();
             fmt = '%-'+ret_str.length+'s';
             printf(fmt, ret_str); print('');
         } 
@@ -300,25 +242,32 @@ get_zfsa_usage() {
             }
 
             // Project usage를 dictionary 구조의 문자열로 출력
-            ret_str = 'ZFSA_USAGE['+ZFSA_CTL+'.'+pool_name+'.'+project_name+'.used_data]='+used_data.toString();
+            ret_str = 'ZFSA_USAGE['+ZFSA_CTL_STR+'.'+pool_name+'.'+project_name+'.used_data]='+used_data.toString();
             fmt = '%-'+ret_str.length+'s';
             printf(fmt, ret_str); print('');
 
-            ret_str = 'ZFSA_USAGE['+ZFSA_CTL+'.'+pool_name+'.'+project_name+'.used_snapshot]='+used_snapshot.toString();
+            ret_str = 'ZFSA_USAGE['+ZFSA_CTL_STR+'.'+pool_name+'.'+project_name+'.used_snapshot]='+used_snapshot.toString();
             fmt = '%-'+ret_str.length+'s';
             printf(fmt, ret_str); print('');
 
-            ret_str = 'ZFSA_USAGE['+ZFSA_CTL+'.'+pool_name+'.'+project_name+'.'+'used_total]='+used_total.toString();
+            ret_str = 'ZFSA_USAGE['+ZFSA_CTL_STR+'.'+pool_name+'.'+project_name+'.'+'used_total]='+used_total.toString();
             fmt = '%-'+ret_str.length+'s';
             printf(fmt, ret_str); print('');
         } 
 
         // Main 
         try {
+            // Location 설정이 없으면
+            if ('${4}' == ''){
+                ZFSA_CTL_STR='${3}';
+            }
+            else {
+                ZFSA_CTL_STR='${4}'+'.'+'${3}';
+            }
+
             // get_hardware();
             get_pool();
             get_project();
-            get_activity();
 
             for (i=0; i<zfsa_pools.length; i++) {
                 get_usage_by_pool(zfsa_pools[i]);
@@ -333,8 +282,7 @@ get_zfsa_usage() {
             print(err);
         }
     }"
-    
-    ret_val=$(echo "$zfsa_script" | ssh -T -o ConnectTimeout=${SSH_TIMEOUT} "${2}@${1}" | grep -v Last)
+    ret_val=$(echo "$zfsa_script" | ssh -T -o ConnectTimeout=${SSH_TIMEOUT} "${1}@${2}" | grep -v Last)
 
     echo "$ret_val"
 }
@@ -343,9 +291,69 @@ get_zfsa_usage() {
 #   / |_) |_) |\/|   |_)  _   _  _      ._ _  _    | |  _  _.  _   _  
 #  /_ |_) | \ |  |   | \ (/_ _> (_) |_| | (_ (/_   |_| _> (_| (_| (/_ 
 #                                                              _|     
+# ZFSA_INVENTORY
+#     - LOC: "Main, DR"
+#     - Main.desc: 
+#     - Main.zfsa: "ZFSACTL1, ZFSACTL2"
+#     - Main.ZFSACTL1: Connection string
+
+show_zfsa_list_by_loc() {
+    locations=($(echo "${ZFSA_INVENTORY[LOC]}" | tr "," " "))
+
+    tbl_row_width=80
+    BD "=" ${tbl_row_width} 
+    TR "%s -a C -w ${tbl_row_width} -l | -r | -c "
+    TR "%s -fc GREEN; ZFS Backup Appliance Status;%s -fc NORMAL;"; TR
+    TR " "; TR; TR " "; TR
+    TR "%s -w 14 ; ;%s -w 10 -a C;CTL;#POOL;#PROJECT;   TOTAL;   USED;%s -w 16;AVAIL"; TR
+
+    BD "=" ${tbl_row_width} 
+    for location in ${locations[@]}; do
+        TR "%s -w 14 -a L;${location};%s -w 66;${ZFSA_INVENTORY[${location}.desc]}"; TR
+
+        # Location내의 ZFSA Controller 리스트 
+        zfsa_list=($(echo "${ZFSA_INVENTORY[${location}.zfsa]}" | tr "," " "))
+        BD "-" ${tbl_row_width}
+        for zfsa in ${zfsa_list[@]}; do
+            # BD "-" ${tbl_row_width}
+            pools=($(echo ${ZFSA_USAGE[${location}.${zfsa}.pools]} | tr "," " "))
+            npool=${#pools[@]}
+            projects=($(echo ${ZFSA_USAGE[${location}.${zfsa}.projects]} | tr "," " "))
+            nproject=${#projects[@]}
+
+            pool_total=0; pool_used=0; pool_avail=0;
+            for pool_name in ${pools[@]}; do
+                pool_total=$(( ${pool_total} +  ${ZFSA_USAGE[${location}.${zfsa}.${pool_name}.ptotal]} ))
+                pool_used=$(( ${pool_used} +  ${ZFSA_USAGE[${location}.${zfsa}.${pool_name}.usage_total]} ))
+                pool_avail=$(( ${pool_avail} +  ${ZFSA_USAGE[${location}.${zfsa}.${pool_name}.pavail]} ))
+            done
+
+            TR "%s -w 14;;%s -w 10 -a C;${zfsa};${npool};${nproject};%s -a R;$(number2str ${pool_total} 0);$(number2str ${pool_used} 0);%s -w 16;$(number2str ${pool_avail} 0) ($(( ${pool_avail} * 100 / ${pool_total} ))%) "; TR
+        done
+        BD "=" ${tbl_row_width}
+    done
+}
+
+# Parameter:
+#   $1: location (optional)
 show_zfsa_usage_by_project() {
+    # Location 정보가 없으면
+    if [[ -z ${1} ]]; then 
+        location=""
+        zfsa_list=($(echo "${ZFSA_INVENTORY[zfsa]}" | tr "," " "))
+    # Location 정보가 있으면
+    else 
+        location=${1}
+        zfsa_list=($(echo "${ZFSA_INVENTORY[${location}.zfsa]}" | tr "," " "))
+        # Location 정보가 있으면 ZFSA_USAGE의 키는 location.zfsa 
+        for i in ${!zfsa_list[@]}; do 
+            zfsa_list[${i}]="${location}.${zfsa_list[${i}]}"
+        done
+    fi
+
     # 전체 풀과 프로젝트 리스트
-    for zfsa in ${!ZFSA_INVENTORY[@]}; do
+    all_pools=""; all_projects=""
+    for zfsa in ${zfsa_list[@]}; do
         all_pools+="${ZFSA_USAGE[${zfsa}.pools]},"
         all_projects+="${ZFSA_USAGE[${zfsa}.projects]},"
     done 
@@ -356,101 +364,62 @@ show_zfsa_usage_by_project() {
     all_projects=($(echo ${all_projects} | tr "," "\n" | sort -u | tr "\n" " "))
 
     # 테이블 표시 형식 정의
-    tr_width_usage_col=6
+    [[ ${#all_pools[@]} -gt 2 ]] && tr_width_usage_col=6 || tr_width_usage_col=8
     tr_width_pool_col=$(( tr_width_usage_col * 3 ))
     tbl_row_width=$(( ${tr_width_pool_col} + ${#all_pools[@]} * ${tr_width_pool_col} + ${tr_width_pool_col} ))
-        
-    BD "=" ${tbl_row_width}
-    TR "%s -a L -w ${tbl_row_width} -l | -c | -r |"
 
-    for zfsa in ${!ZFSA_INVENTORY[@]}; do
-        TR " ${zfsa}"; TR
-        TR "    Pool: ${ZFSA_USAGE[${zfsa}.pools]}"; TR
-        TR "    CPU: ${ZFSA_USAGE[${zfsa}.activity.cpu]}%   I/O: ${ZFSA_USAGE[${zfsa}.activity.io]} IOPS    NFS: ${ZFSA_USAGE[${zfsa}.activity.nfs]} OPS    NET: ${ZFSA_USAGE[${zfsa}.activity.nic]} KB"; TR
-    done    
+    # 상단 헤더    
     BD "=" ${tbl_row_width}
+    TR "%s -a C -w ${tbl_row_width} -l | -c | -r | -fc GREEN"
+    [[ ! -z ${location} ]] && TR "[${1}] ZFS Backup Appliance Usage;%s -fc NORMAL" || TR "ZFS Backup Appliance Usage;%s -fc NORMAL"; TR
+    TR " "; TR; TR " "; TR
 
-    # 
-    BD "=" ${tbl_row_width}
-    for pool_name in ${all_pools[@]}; do
-        pool_str+="${pool_name};"
-        pool_str1+=" ;"
-        pool_str2+="DATA;SNAP;TOTAL;"
+    ## Pool 사용 현황 요약 
+    TR "%s -a L"
+    for zfsa in ${zfsa_list[@]}; do
+        zfsa_pools=($(echo ${ZFSA_USAGE[${zfsa}.pools]} | tr "," " "))
+        TR "%s -fc LRED; [ ${zfsa} ];%s -fc NORMAL"; TR
+        # Pool 사용 현황 요약
+        for pool_name in ${zfsa_pools[@]}; do
+            # ZFSA 풀 리스트에 풀이 존재하면
+            if [[ $(in_str ${ZFSA_USAGE[${zfsa}.pools]} ${pool_name}) -eq 0 ]]; then 
+                pool_total=${ZFSA_USAGE[${zfsa}.${pool_name}.ptotal]}
+                pool_used=${ZFSA_USAGE[${zfsa}.${pool_name}.usage_data]}
+                pool_avail=${ZFSA_USAGE[${zfsa}.${pool_name}.pavail]}
+                TR "   ${pool_name} - Total: $(number2str ${pool_total}), Used: $(number2str ${pool_used}), Available: $(number2str ${pool_avail}) ($(( ${pool_avail} * 100 / ${pool_total} ))%)"; TR
+            fi
+        done 
     done 
-    # 마지막 ; 문자 제거
-    pool_str=$(echo "${pool_str}" | sed 's/.$//')
-    pool_str1=$(echo "${pool_str1}" | sed 's/.$//')
-    pool_str2=$(echo "${pool_str2}" | sed 's/.$//')
 
-    # 타이틀 행
-    TR "%s -a C -w ${tr_width_pool_col} -l | -c | -r |"
-    TR " ;${pool_str}; "; TR 
-    TR " ;${pool_str1}; "; TR 
-    TR "PROJECTS;%s -w ${tr_width_usage_col};${pool_str2};%s -w ${tr_width_pool_col};SUM"; TR
-    BD "-" ${tbl_row_width}
-    
-    for project_name in ${all_projects[@]}; do
-        project_used_sum=0
-        project_used_str="${project_name};"
-
-        for pool_name in ${all_pools[@]}; do 
-            for zfsa in ${!ZFSA_INVENTORY[@]}; do
-                # ZFSA Controller의 풀, 프로젝트 리스트
-                zfsa_pools="${ZFSA_USAGE[${zfsa}.pools]}"
-                zfsa_projects="${ZFSA_USAGE[${zfsa}.${pool_name}.projects]}"
-
-                # 콘트롤러에 풀이 존재하지 않으면 
-                if [[ ! ${zfsa_pools} = *${pool_name}* ]]; then 
-                    continue 
-                fi 
-
-                # echo "ZFSA_USAGE[${zfsa}.${pool_name}.${project_name}.used_total=${used_total}"
-                # 프로젝트가 존재하면 사용량 표시
-                if [[ ${zfsa_projects} = *${project_name}* ]]; then 
-                    used_data=${ZFSA_USAGE[${zfsa}.${pool_name}.${project_name}.used_data]}
-                    used_snapshot=${ZFSA_USAGE[${zfsa}.${pool_name}.${project_name}.used_snapshot]}
-                    used_total=${ZFSA_USAGE[${zfsa}.${pool_name}.${project_name}.used_total]}
-
-                    # 프로젝트 사용량 합계
-                    project_used_sum=$((${project_used_sum} + ${used_total}))
-
-                    # 숫자를 문자열로 변환
-                    used_data=$(number2str ${used_data})
-                    used_snapshot=$(number2str ${used_snapshot})
-                    used_total=$(number2str ${used_total})
-
-                    project_used_str+="%s -w ${tr_width_usage_col};${used_data};${used_snapshot};${used_total};"
-                # 프로젝트가 존재하지 않으면 X로 표시               
-                else 
-                    project_used_str+="%s -w ${tr_width_usage_col};X;X;X;"
-                fi 
-            done 
-        done
-
-        project_used_sum=$(number2str ${project_used_sum})
-        project_used_str+="%s -w ${tr_width_pool_col};${project_used_sum}"
-        TR "${project_used_str}"; TR 
-    done
-    BD "=" ${tbl_row_width}
-
-    # Pool별 사용 현황
-    pool_total_str="Total;"; pool_used_str="Used;"; pool_avail_str="Avail;"; pool_avail_ratio_str=";"
-    pool_total_sum=0; pool_used_sum=0; pool_avail_sum=0
+    # 사용 현황 출력 문자열 생성
+    pool_total_str="%s -a R;TOTAL ;%s -a C;"; pool_used_str="%s -a R;Used_Data ;%s -a C;"; pool_snap_str="%s -a R;Snapshot_Data ;%s -a C;"; pool_repl_str="%s -a R;Replication_Data ;%s -a C;"; pool_used_total_str="%s -a R;Used_Total ;%s -a C;"; pool_avail_str="%s -a R;Available ;%s -a C;"; pool_avail_ratio_str=";"
+    pool_total_sum=0; pool_used_sum=0; pool_snap_sum=0; pool_repl_sum=0; pool_used_total_sum=0; pool_avail_sum=0;
 
     for pool_name in ${all_pools[@]}; do 
-        for zfsa in ${!ZFSA_INVENTORY[@]}; do
+        for zfsa in ${zfsa_list[@]}; do
             zfsa_pools="${ZFSA_USAGE[${zfsa}.pools]}"
-            if [[ ${zfsa_pools} =~ ${pool_name} ]]; then 
-                pool_total=${ZFSA_USAGE[${zfsa}.${pool_name}.total]}
-                pool_used=${ZFSA_USAGE[${zfsa}.${pool_name}.used]}
-                pool_avail=${ZFSA_USAGE[${zfsa}.${pool_name}.avail]}
+
+            # ZFSA 풀 리스트에 풀이 존재하면
+            if [[ $(in_str ${zfsa_pools} ${pool_name}) -eq 0 ]]; then 
+                pool_total=${ZFSA_USAGE[${zfsa}.${pool_name}.ptotal]}
+                pool_used=${ZFSA_USAGE[${zfsa}.${pool_name}.usage_data]}
+                pool_snap=${ZFSA_USAGE[${zfsa}.${pool_name}.usage_snapshots]}
+                pool_repl=${ZFSA_USAGE[${zfsa}.${pool_name}.usage_replication]}
+                pool_used_total=${ZFSA_USAGE[${zfsa}.${pool_name}.usage_total]}
+                pool_avail=${ZFSA_USAGE[${zfsa}.${pool_name}.pavail]}
 
                 pool_total_sum=$(( ${pool_total_sum} + ${pool_total} ))
                 pool_used_sum=$(( ${pool_used_sum} + ${pool_used} ))
+                pool_snap_sum=$(( ${pool_snap_sum} + ${pool_snap} ))
+                pool_repl_sum=$(( ${pool_repl_sum} + ${pool_repl} ))
+                pool_used_total_sum=$(( ${pool_used_total_sum} + ${pool_used_total} ))
                 pool_avail_sum=$(( ${pool_avail_sum} + ${pool_avail} ))
 
                 pool_total_str+="$(number2str ${pool_total});"
                 pool_used_str+="$(number2str ${pool_used});"
+                pool_snap_str+="$(number2str ${pool_snap});"
+                pool_repl_str+="$(number2str ${pool_repl});"
+                pool_used_total_str+="$(number2str ${pool_used_total});"
                 pool_avail_str+="$(number2str ${pool_avail});"
                 pool_avail_ratio_str+="[$(( ${pool_avail} * 100 / ${pool_total} ))%];"
             fi 
@@ -459,54 +428,213 @@ show_zfsa_usage_by_project() {
 
     pool_total_str+="$(number2str ${pool_total_sum})"
     pool_used_str+="$(number2str ${pool_used_sum})"
+    pool_snap_str+="$(number2str ${pool_snap_sum})"
+    pool_repl_str+="$(number2str ${pool_repl_sum})"
+    pool_used_total_str+="$(number2str ${pool_used_total_sum})"
     pool_avail_str+="$(number2str ${pool_avail_sum})"
     pool_avail_ratio_str+="[$(( ${pool_avail_sum} * 100 / ${pool_total_sum} ))%]"
+    
+    ## Pool 사용 현황 상세
+    BD "=" ${tbl_row_width}
+    # 타이틀 출력
+    TR "%s -a C -w ${tr_width_pool_col} -l | -c | -r |"
+    TR "POOL NAME;$(echo ${all_pools[@]} | tr " " ";");SUM TOTAL"; TR
+    BD "-" ${tbl_row_width}
 
-    TR ${pool_total_str}; TR
-    TR ${pool_used_str}; TR
-    TR ${pool_avail_str}; TR
-    TR ${pool_avail_ratio_str}; TR
+    TR "${pool_total_str}"; TR
+    TR "${pool_used_str}"; TR
+    TR "${pool_snap_str}"; TR
+    TR "${pool_repl_str}"; TR
+    TR "${pool_used_total_str}"; TR
+    TR "${pool_avail_str}"; TR 
+    TR "${pool_avail_ratio_str}"; TR
+    BD "=" ${tbl_row_width}
+
+    ## 프로젝트 상세 현황
+    pool_str=""
+    for pool_name in ${all_pools[@]}; do
+        pool_str+="DATA;SNAP;TOTAL;"
+    done 
+    # 마지막 ; 문자 제거
+    pool_str=$(echo "${pool_str}" | sed 's/.$//')
+
+    # 타이틀 출력
+    TR "%s -a C -w ${tr_width_pool_col} -l | -c | -r |"
+    TR "PROJECTS;%s -w ${tr_width_usage_col};${pool_str};%s -w ${tr_width_pool_col};SUM TOTAL"; TR
+    BD "-" ${tbl_row_width}
+    
+    project_used_str=""
+    for project_name in ${all_projects[@]}; do
+        project_used_sum=0
+        project_used_str="%s -a R;${project_name} ;%s -a C;"
+
+        for pool_name in ${all_pools[@]}; do 
+            for zfsa in ${zfsa_list[@]}; do
+                # ZFSA Controller의 풀, 프로젝트 리스트
+                zfsa_pools="${ZFSA_USAGE[${zfsa}.pools]}"
+                zfsa_projects="${ZFSA_USAGE[${zfsa}.${pool_name}.projects]}"
+
+                # 콘트롤러에 풀이 존재하지 않으면
+                if [[ $(in_str ${zfsa_pools} ${pool_name}) -ne 0 ]]; then 
+                    continue 
+                fi 
+
+                # echo "ZFSA_USAGE[${zfsa}.${pool_name}.${project_name}.used_total=${used_total}"
+                # 프로젝트가 존재하면 사용량 표시
+                if [[ $(in_str ${zfsa_projects} ${project_name}) -eq 0 ]]; then 
+                    used_data=${ZFSA_USAGE[${zfsa}.${pool_name}.${project_name}.used_data]}
+                    used_snapshot=${ZFSA_USAGE[${zfsa}.${pool_name}.${project_name}.used_snapshot]}
+                    used_total=${ZFSA_USAGE[${zfsa}.${pool_name}.${project_name}.used_total]}
+
+                    # 프로젝트 사용량 합계
+                    project_used_sum=$((${project_used_sum} + ${used_total}))
+
+                    # 숫자를 문자열로 변환
+                    used_data=$(number2str ${used_data} 0)
+                    used_snapshot=$(number2str ${used_snapshot} 0)
+                    used_total=$(number2str ${used_total} 0)
+
+                    project_used_str+="%s -a C -w ${tr_width_usage_col};${used_data};${used_snapshot};${used_total};"
+                # 프로젝트가 존재하지 않으면 X로 표시               
+                else 
+                    project_used_str+="%s -a C -w ${tr_width_usage_col};-;-;-;"
+                fi 
+            done 
+        done
+
+        project_used_sum=$(number2str ${project_used_sum})
+        project_used_str+="%s -w ${tr_width_pool_col};${project_used_sum}"
+        TR "%s -c |;${project_used_str}"; TR 
+    done
     BD "=" ${tbl_row_width}
 }
 
-# config 파일에서 ZFSA와 DB서버 정보 확인
-parsing_config_file() {
+# 인베토리 파일을 사용하지 않을때, ZFSA 로긴 스트링으로 인벤토리 정보 생성
+# Location 정보 사용 하지 않음
+parsing_inventory_env() {
+    # ZFSA 로긴 스트링으로 접속 컨트롤러 수 확인
+    noctl=$(set | grep ^${ZFSA_LOGINSTR_PREFIX} | wc -l)
+    
+    for i in $(seq 1 ${noctl}); do 
+        # ZFSA 이름은 로긴 스트링의 서버명으로
+        zfsa_login_str=$(eval "echo $"{${ZFSA_LOGINSTR_PREFIX}${i}}"")
+        zfsa_name=$(echo ${zfsa_login_str} | cut -d"@" -f 2)
+        # 접속 스트링은 uid:ZFSA Controller
+        zfsa_connection_str=$(echo ${zfsa_login_str} | tr "@" ":")
+        
+        # ZFSA 로긴 스트링 환경 변수로 구성시 로케이션 설정 안함
+        ZFSA_INVENTORY[LOC]=""
+        ZFSA_INVENTORY[zfsa]+="${zfsa_name},"
+        ZFSA_INVENTORY[${zfsa_name}]=${zfsa_connection_str}
+    done 
+}
 
-    while IFS=" " read -r name serverip userid option
-    do
-        # 코멘트, 빈줄 제거 
-        if [[ ${name} =~ ^# || ${name} =~ ^\; || -z ${name} ]]; then                                 # Ignore comments / empty lines
+# config 파일에서 ZFSA와 DB서버 정보 확인
+# 구성 파일의 내용을 ZFSA 구성 정보로 설정
+# ini 파일의 []내용은 ZFSA 업무/센터 등의 구분자로(LOC:Location)
+# ;;는 Location의 부가 설명 
+parsing_inventory_file() {
+    while read -r line; do
+        if [[ ${line:0:1} == \# || -z ${line} ]]; then  
             continue;
         fi
-        
-        # ZFSA 섹션이면
-        if [[ ${name} =~ ^"["ZFSA"]"$ ]]; then
-            section=ZFSA
-        # ORADB 섹션이면
-        elif [[ ${name} =~ ^"["ORADB"]"$ ]]; then
-            section=ORADB 
+
+        # 섹션-Location
+        if [[ ${line:0:1} == "[" && ${line:${#line}-1:1} == "]" ]]; then
+            loc=$(echo ${line} | sed 's/^\[//;s/\]$//')
+            ZFSA_INVENTORY[LOC]+="${loc},"
+        # 디스크립션
+        elif [[ ${line:0:2} == ";;" ]]; then 
+            ZFSA_INVENTORY[${loc}.desc]="${line:2:${#line}-1}"
         else 
-            eval "${section}_INVENTORY[${name}]=${serverip}:${userid}:${option}"
-        fi 
+            # ZFSA 이름과 접속 정보를 분리
+            zfsa_name=$(echo "${line}" | awk '{print $1}')
+            zfsa_connection_str=$(echo "${line}" | awk '{print $3":"$2":"$4}')
+            
+            ZFSA_INVENTORY[${loc}.zfsa]+="${zfsa_name},"
+            ZFSA_INVENTORY[${loc}.${zfsa_name}]=${zfsa_connection_str}
+        fi
     done < ${INVENTORY_FILE}
+}
+
+# 
+# Parameter:
+#   $1: ZFSA Controller 리스트 문자열
+#   $2: Location (optional)
+get_usage() {
+    # 문자열을 어레이로 변환
+    zfsa_list=($(echo "${1}" | tr "," " "))
+
+    for zfsa in ${zfsa_list[@]}; do
+        # Location이 없으면
+        if [[ -z ${2} ]]; then
+            login_str="$(echo ${ZFSA_INVENTORY[${zfsa}]} | tr ":" " ") ${zfsa}"
+        else 
+            login_str="$(echo ${ZFSA_INVENTORY[${2}.${zfsa}]} | tr ":" " ") ${zfsa} ${2}"
+        fi 
+        
+        # ZFSA 구성 정보를 파일로 저장
+        if [[ ! -z ${DUMP_FILE} ]]; then 
+            get_zfsa_usage ${login_str} >> ${DUMP_FILE}
+        # ZFSA 구성 정보 로딩
+        else 
+            eval "$(get_zfsa_usage ${login_str})"
+        fi 
+    done
+}
+
+# 인벤토리 파일 또는 ZBRM 프로파일로 인벤토리 정보 생성
+# 인베토리 정보를 이용해 ZFSA Controller에 접속해 현황 정보 로딩
+init() {
+
+    # Common function 로딩
+    . ./common.sh
+
+    # 인벤토리 파일이 없으면, ZBRM 프로파일 정보 사용 
+    if [[ -z ${INVENTORY_FILE} || ! -f ${INVENTORY_FILE} ]]; then
+        parsing_inventory_env
+    # 인벤토리 파일을 지정하면
+    else 
+        parsing_inventory_file 
+    fi  
+
+    # 덤프 파일의 구성 정보 로딩
+    if [[ -f ${DEBUG_FILE} ]]; then 
+        eval "$(cat ${DEBUG_FILE})"
+    # ZFSA에 접속해 구성 정보 로딩
+    else 
+        # Location 정보가 없으면
+        if [[ -z ${ZFSA_INVENTORY[LOC]} ]]; then 
+            get_usage ${ZFSA_INVENTORY[zfsa]}
+        else 
+            loc_list=($(echo "${ZFSA_INVENTORY[LOC]}" | tr "," " "))
+            
+            for loc in ${loc_list[@]}; do
+                get_usage ${ZFSA_INVENTORY[${loc}.zfsa]} ${loc}
+            done
+        fi
+    fi 
+}
+
+help() {
+cat <<USAGEINFO
+usage: showdashboard.sh [-ido]
+    [-i | --inventory] inventory_file   
+        인벤토리 파일 설정, 설정하지 않으면 INVENTORY_FILE 환경 변수에 정의된 파일명 사용
+        인벤토리 파일이 없으면, ZBRM Profile의 LOGINSTRING_# 환경 변수의 ZFSA 설정 값 사용
+    [-d | --debug] dump_file
+       덤프 파일을 이용해한 테스트
+    [-o | --out] dump_file
+        덤프 파일 생성
+USAGEINFO
+    exit 1
 }
 
 # Arguments 파싱
 parsing_arg() {
     while [[ ${#} -gt 0 ]]; do
         case ${1} in
-            -i|--interval)
-                shift 1
-                if [[ -z ${1} || ! ${1} =~ ^[0-9]+$ ]]; then
-                    help
-                else
-                    INTERVAL=${1}
-                    UPDATE_MODE="ON"
-                fi
-
-                shift 1
-                ;;
-            -f|--file)
+            -i|--inventory)
                 shift 1
                 if [[ -z ${1} ]]; then
                     help
@@ -515,65 +643,74 @@ parsing_arg() {
                     shift 1
                 fi
                 ;;
+            -d|--debug)
+                shift 1
+                # ZFSA 덤프 파일 로딩
+                if [[ ! -z ${1} ]]; then 
+                    DEBUG_FILE="${1}"
+                    shift 1
+                fi    
+                ;;
+            -o|--out)
+                shift 1
+                # ZFSA 덤프 파일로 생성
+                if [[ ! -z ${1} ]]; then 
+                    DUMP_FILE="${1}"
+                    shift 1
+                fi     
+                ;; 
+            *)
+                shift 1
+                ;;
         esac
     done
 }
 
-# inventory 파일 해석, 데이터 초기화
-init() {
-
-    # Common function 로딩
-    . ./common.sh
-
-    # 수행 옵션 파싱
-    parsing_arg 
-
-    # 인벤토리 파일이 없으면 
-    if [[ -z ${INVENTORY_FILE} || ! -f ${INVENTORY_FILE} ]]; then
-        echo -e ${RED}"Inventory file not found."${NORMAL}
-        exit 1
-    fi 
-
-    # Inventory 파일 파싱후 ZFSA_INVENTORY, ORADB_INVENTORY dictionary 생성
-    parsing_config_file ${INVENTORY_FILE}
-
-    # 인벤토리 항목이 없으면
-    if [[ ${#ZFSA_INVENTORY[@]} -eq 0 && ${#ORADB_INVENTORY[@]} ]]; then 
-        echo -e ${RED}"Inventory file contains no items."${NORMAL}
-        exit 1
-    fi 
-    
-    # 모든 ZFSA Controller에 접속해 현황 정보를 딕셔너리 구조로 저장 
-    for key in "${!ZFSA_INVENTORY[@]}"; do
-        para=$(echo ${ZFSA_INVENTORY[$key]} | tr ":" " ") 
-        
-        # [테스트]현황 정보를 파일로 저장할때
-        # get_zfsa_usage ${para} ${key} >> zfsa.out
-
-        # [실사용]현황 정보의 딕셔너리 구조를 쉘 환경 변수로 
-        # eval "$(get_zfsa_usage ${para} ${key})"
-    done
-    # [테스트] 저장된 파일의 딕셔너릴 구조를 쉘 환경 변수로 
-    eval "$(cat ZFS9.out)"
-}
-
 # Main rountie
-# 초기화
+# 수행 옵션 파싱
+parsing_arg "${@}"
+
+# 인벤토리 정보 구성, ZFSA 구성 정보 로딩
 init 
 
-while true :
-do
+# 덤프 파일 생성이면 종료
+if [[ ! -z ${DUMP_FILE} ]]; then 
+    exit 0
+fi 
+
+# Location 설정이 없으면, 현황 정보 출력 후 종료
+if [[ -z ${ZFSA_INVENTORY[LOC]} ]]; then
     clear
     show_zfsa_usage_by_project
+else
+    # Location 설정이 있으면 화면 네비게이션 모드로
+    selection=HOME
+    curr_loc=""
+    prompt_msg=""
 
-    if [[ ${INTERVAL} -eq 0 ]]; then
-        break
-    fi
+    while [[ ! ${selection} == quit ]]; do
+        clear
 
-    sleep ${INTERVAL}
-done 
+        if [[ $(in_str ${ZFSA_INVENTORY[LOC]} ${selection}) -eq 0 ]]; then
+            curr_loc=${selection}
+            show_zfsa_usage_by_project ${selection}
+            prompt_msg="Select Location or quit: "
+        elif [[ ! -z ${curr_loc} && $(in_str ${ZFSA_INVENTORY[${curr_loc}.zfsa]} ${selection}) -eq 0 ]]; then
+            show_zfsa_detail ${curr_loc} ${selection}
+            prompt_msg="Select Location or quit: "
+        else
+            curr_loc=""
+            show_zfsa_list_by_loc
+            prompt_msg="Select location or quit: "
+        fi  
 
-exit 0
+        read -p "${prompt_msg}" selection
+        # selection=$(echo ${selection} | tr '[:lower:]' '[:upper:]')
+
+        # 아무 입력이 없으면
+        [[ -z ${selection} ]] && selection=HOME
+    done 
+fi
 
 #│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
 # End of script
