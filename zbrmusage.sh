@@ -1,18 +1,8 @@
 #!/bin/sh
 #│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
 # 
-# ZFS Appliance Usage v0.72
+# ZFS Appliance Usage v0.8
 # 
-# zbrmusage.sh [-if]
-# - zfsadashboard.sh -i 5 -f inventory.ini       ZFSA Resource 상태 5초 간격으로 보기
-#			
-# Bug fix:
-#   - Controller에 풀, 프로젝트가 없을 때의 오류
-#   - ksh ~= 미지원 : string = *substring* 으로 변경
-# Enhancement:
-#   - 멀티 센터에 대한 지원(동일 풀이름 구성 지원) => TBD
-# ZBRM Profile의 ZFSA 접속 정보 사용 
-# - parsing_inventory_env 함수 추가
 #│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
 
 # Default inventory 파일
